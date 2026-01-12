@@ -2,12 +2,7 @@ import platform
 
 from setuptools import setup
 
-# The AppVeyor build doesn't use rustup, so we run cargo directly there
-if platform.system() == 'Windows':
-    BUILD_CMD = ['cargo', 'build', '--release']
-else:
-    BUILD_CMD = ['rustup', 'run', 'nightly', 'cargo', 'build', '--release']
-
+BUILD_CMD = ['cargo', 'build', '--release']
 
 def build_native(spec):
     build = spec.add_external_build(cmd=BUILD_CMD, path='./rust')

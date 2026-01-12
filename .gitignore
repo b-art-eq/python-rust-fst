@@ -9,3 +9,4 @@ fstwrapper/target
 .tox
 /wheelhouse
 /docs/_build
+/rust/target/
