@@ -6,7 +6,6 @@ extern crate fst_regex;
 use std::error::Error;
 use std::ffi::{CStr, CString};
 use std::fs::File;
-use std::intrinsics;
 use std::io;
 use std::ptr;
 use fst_regex::Regex;
@@ -58,7 +57,7 @@ pub fn to_raw_ptr<T>(v: T) -> *mut T {
 // FIXME: This requires the nightly channel, isn't there a better way to
 //        get this information?
 pub fn get_typename<T>(_: &T) -> &'static str {
-    unsafe { intrinsics::type_name::<T>() }
+    std::any::type_name::<T>()
 }
 
 #[no_mangle]

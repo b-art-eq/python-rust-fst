@@ -1,5 +1,4 @@
 #![crate_type = "dylib"]
-#![feature(core_intrinsics)]
 
 extern crate libc;
 extern crate fst;
