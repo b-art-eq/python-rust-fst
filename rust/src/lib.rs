@@ -1,122 +1,28 @@
-#![crate_type = "dylib"]
+use pyo3::prelude::*;
 
-extern crate libc;
-extern crate fst;
-extern crate fst_regex;
-extern crate fst_levenshtein;
+mod map;
+mod set;
+mod util;
 
-
-/// Get an immutable reference from a raw pointer
-macro_rules! ref_from_ptr {
-    ($p:ident) => (unsafe {
-        assert!(!$p.is_null());
-        &*$p
-    })
+#[pymodule]
+fn _native(_py: Python, m: &PyModule) -> PyResult<()> {
+    m.add_class::<map::Map>()?;
+    m.add_class::<map::MapBuilder>()?;
+    m.add_class::<map::MapKeys>()?;
+    m.add_class::<map::MapValues>()?;
+    m.add_class::<map::MapItems>()?;
+    m.add_class::<map::MapRegexStream>()?;
+    m.add_class::<map::MapLevStream>()?;
+    
+    m.add_class::<set::Set>()?;
+    m.add_class::<set::SetBuilder>()?;
+    m.add_class::<set::SetStream>()?;
+    m.add_class::<set::SetRegexStream>()?;
+    m.add_class::<set::SetLevStream>()?;
+    m.add_class::<set::SetUnion>()?;
+    m.add_class::<set::SetIntersection>()?;
+    m.add_class::<set::SetDifference>()?;
+    m.add_class::<set::SetSymmetricDifference>()?;
+    
+    Ok(())
 }
-
-/// Get a mutable reference from a raw pointer
-macro_rules! mutref_from_ptr {
-    ($p:ident) => (unsafe {
-        assert!(!$p.is_null());
-        &mut *$p
-    })
-}
-
-/// Get the object referenced by the raw pointer
-macro_rules! val_from_ptr {
-    ($p:ident) => (unsafe {
-        assert!(!$p.is_null());
-        Box::from_raw($p)
-    })
-}
-
-/// Declare a function that frees a struct's memory
-macro_rules! make_free_fn {
-    ($name:ident, $t:ty) => (
-        #[no_mangle]
-        pub extern fn $name(ptr: $t) {
-            assert!(!ptr.is_null());
-            val_from_ptr!(ptr);
-        }
-    )
-}
-
-/// Declare a function that returns the next item from a set stream
-macro_rules! set_make_next_fn {
-    ($name:ident, $t:ty) => (
-        #[no_mangle]
-        pub extern fn $name(ptr: $t) -> *const libc::c_char {
-            let stream = mutref_from_ptr!(ptr);
-            match stream.next() {
-                Some(val) => ::std::ffi::CString::new(val).unwrap().into_raw(),
-                None      => ::std::ptr::null()
-            }
-        }
-    )
-}
-
-/// Declare a function that returns the next item from a map stream
-macro_rules! map_make_next_fn {
-    ($name:ident, $t:ty) => (
-        #[no_mangle]
-        pub extern fn $name(ptr: $t) -> *mut MapItem {
-            let stream = mutref_from_ptr!(ptr);
-            match stream.next() {
-                Some((k, v)) => to_raw_ptr(
-                    MapItem { key: ::std::ffi::CString::new(k).unwrap().into_raw(),
-                              value: v }),
-                None         => ::std::ptr::null_mut()
-            }
-        }
-    )
-}
-
-/// Declare a function that returns the next item from a map stream
-macro_rules! mapop_make_next_fn {
-    ($name:ident, $t:ty) => (
-        #[no_mangle]
-        pub extern fn $name(ptr: $t) -> *const MapOpItem {
-            let stream = mutref_from_ptr!(ptr);
-            match stream.next() {
-                Some((k, vs)) => {
-                    let vals: Vec<CIndexedValue> = (0..vs.len()).map(|idx| {
-                        CIndexedValue { index: vs[idx].index,
-                                        value: vs[idx].value }
-                    }).collect();
-                    let mut vals_boxed: Box<[CIndexedValue]> = vals.into_boxed_slice();
-                    let vals_ptr: *const CIndexedValue = vals_boxed.as_ptr();
-                    mem::forget(vals_boxed);
-                    to_raw_ptr(MapOpItem {
-                        key: ::std::ffi::CString::new(k).unwrap().into_raw(),
-                        num_values: vs.len(),
-                        values: vals_ptr })
-                },
-                None         => ::std::ptr::null_mut()
-            }
-        }
-    )
-}
-
-/// Evaluate an expression and in case of an error, store information about the error in the passed
-/// Context struct and return a default value.
-macro_rules! with_context {
-    ($ctx_ptr:ident, $default_rval:expr, $e:expr) => {{
-        let ctx = mutref_from_ptr!($ctx_ptr);
-        ctx.has_error = false;
-        match $e {
-            Ok(val) => val,
-            Err(err) => {
-                ctx.has_error = true;
-                ctx.error_type = $crate::util::str_to_cstr($crate::util::get_typename(&err));
-                ctx.error_debug = $crate::util::str_to_cstr(&format!("{:?}", err));
-                ctx.error_display = $crate::util::str_to_cstr(&format!("{}", err));
-                ctx.error_description = $crate::util::str_to_cstr(err.description());
-                return $default_rval;
-            }
-        }
-    }}
-}
-
-pub mod util;
-pub mod set;
-pub mod map;

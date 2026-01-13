@@ -1,221 +1,290 @@
-extern crate libc;
-
-use std::error::Error;
+use pyo3::prelude::*;
+use pyo3::exceptions::{PyValueError, PyTypeError};
 use std::fs::File;
-use std::io;
-use std::ptr;
-use fst::{IntoStreamer, Streamer, Set, SetBuilder};
-use fst::set;
-use fst_levenshtein::Levenshtein;
-use fst_regex::Regex;
+use std::io::BufWriter;
+use std::sync::Arc;
+use memmap2::Mmap;
+use fst::{Set as FstSet, SetBuilder as FstSetBuilder, Streamer, IntoStreamer};
+use fst::automaton::Levenshtein;
+use regex_automata::DenseDFA;
 
-use util::{Context, cstr_to_str, to_raw_ptr};
-
-
-pub type FileSetBuilder = SetBuilder<&'static mut io::BufWriter<File>>;
-pub type MemSetBuilder = SetBuilder<Vec<u8>>;
-pub type SetLevStream = set::Stream<'static, &'static Levenshtein>;
-pub type SetRegexStream = set::Stream<'static, &'static Regex>;
-
-
-#[no_mangle]
-pub extern "C" fn fst_filesetbuilder_new(ctx: *mut Context,
-                                         wtr_ptr: *mut io::BufWriter<File>)
-                                         -> *mut FileSetBuilder {
-    let wtr = mutref_from_ptr!(wtr_ptr);
-    to_raw_ptr(with_context!(ctx, ptr::null_mut(), SetBuilder::new(wtr)))
+#[derive(Clone)]
+pub enum SetData {
+    Vec(Arc<Vec<u8>>),
+    Mmap(Arc<Mmap>),
 }
 
-#[no_mangle]
-pub extern "C" fn fst_filesetbuilder_insert(ctx: *mut Context,
-                                            ptr: *mut FileSetBuilder,
-                                            s: *mut libc::c_char)
-                                            -> bool {
-    let build = mutref_from_ptr!(ptr);
-    with_context!(ctx, false, build.insert(cstr_to_str(s)));
-    true
+impl AsRef<[u8]> for SetData {
+    fn as_ref(&self) -> &[u8] {
+        match self {
+            SetData::Vec(v) => v,
+            SetData::Mmap(m) => m,
+        }
+    }
 }
 
-#[no_mangle]
-pub extern "C" fn fst_filesetbuilder_finish(ctx: *mut Context, ptr: *mut FileSetBuilder) -> bool {
-    let build = val_from_ptr!(ptr);
-    with_context!(ctx, false, build.finish());
-    true
+#[pyclass]
+#[derive(Clone)]
+pub struct Set {
+    pub inner: FstSet<SetData>,
 }
 
-#[no_mangle]
-pub extern "C" fn fst_memsetbuilder_new() -> *mut MemSetBuilder {
-    to_raw_ptr(SetBuilder::memory())
+#[pymethods]
+impl Set {
+    #[new]
+    fn new(path_or_bytes: &PyAny) -> PyResult<Self> {
+        if let Ok(path) = path_or_bytes.extract::<String>() {
+            let file = File::open(path)?;
+            let mmap = unsafe { Mmap::map(&file)? };
+            let set = FstSet::new(SetData::Mmap(Arc::new(mmap)))
+                .map_err(|e| PyValueError::new_err(e.to_string()))?;
+            Ok(Set { inner: set })
+        } else if let Ok(bytes) = path_or_bytes.extract::<&[u8]>() {
+            let set = FstSet::new(SetData::Vec(Arc::new(bytes.to_vec())))
+                .map_err(|e| PyValueError::new_err(e.to_string()))?;
+            Ok(Set { inner: set })
+        } else {
+            Err(PyTypeError::new_err("Argument must be a path (str) or bytes"))
+        }
+    }
+
+    fn __contains__(&self, key: &str) -> bool {
+        self.inner.contains(key)
+    }
+
+    fn __len__(&self) -> usize {
+        self.inner.len()
+    }
+
+    fn __iter__(&self) -> SetStream {
+        let stream = self.inner.stream();
+        let stream = unsafe { std::mem::transmute(stream) };
+        SetStream {
+            _set: self.inner.clone(),
+            stream,
+        }
+    }
+
+    fn search_re(&self, regex: &str) -> PyResult<SetRegexStream> {
+        let dfa = regex_automata::dense::Builder::new()
+            .anchored(true)
+            .build(regex)
+            .map_err(|e| PyValueError::new_err(e.to_string()))?;
+        let stream = self.inner.search(&dfa).into_stream();
+        let stream = unsafe { std::mem::transmute(stream) };
+        Ok(SetRegexStream {
+            _set: self.inner.clone(),
+            _dfa: dfa,
+            stream,
+        })
+    }
+
+    fn search_lev(&self, key: &str, max_dist: u32) -> PyResult<SetLevStream> {
+        let lev = Levenshtein::new(key, max_dist).map_err(|e| PyValueError::new_err(e.to_string()))?;
+        let stream = self.inner.search(&lev).into_stream();
+        let stream = unsafe { std::mem::transmute(stream) };
+        Ok(SetLevStream {
+            _set: self.inner.clone(),
+            _lev: lev,
+            stream,
+        })
+    }
+
+    fn is_disjoint(&self, other: &Set) -> bool {
+        self.inner.is_disjoint(&other.inner)
+    }
+
+    fn is_subset(&self, other: &Set) -> bool {
+        self.inner.is_subset(&other.inner)
+    }
+
+    fn is_superset(&self, other: &Set) -> bool {
+        self.inner.is_superset(&other.inner)
+    }
+
+    fn union(&self, other: &Set) -> SetUnion {
+        let sets = vec![self.clone(), other.clone()];
+        let op = self.inner.op().add(&self.inner).add(&other.inner).union();
+        let stream = unsafe { std::mem::transmute(op) };
+        SetUnion { _sets: sets, stream }
+    }
+
+    fn intersection(&self, other: &Set) -> SetIntersection {
+        let sets = vec![self.clone(), other.clone()];
+        let op = self.inner.op().add(&self.inner).add(&other.inner).intersection();
+        let stream = unsafe { std::mem::transmute(op) };
+        SetIntersection { _sets: sets, stream }
+    }
+
+    fn difference(&self, other: &Set) -> SetDifference {
+        let sets = vec![self.clone(), other.clone()];
+        let op = self.inner.op().add(&self.inner).add(&other.inner).difference();
+        let stream = unsafe { std::mem::transmute(op) };
+        SetDifference { _sets: sets, stream }
+    }
+
+    fn symmetric_difference(&self, other: &Set) -> SetSymmetricDifference {
+        let sets = vec![self.clone(), other.clone()];
+        let op = self.inner.op().add(&self.inner).add(&other.inner).symmetric_difference();
+        let stream = unsafe { std::mem::transmute(op) };
+        SetSymmetricDifference { _sets: sets, stream }
+    }
 }
 
-#[no_mangle]
-pub extern "C" fn fst_memsetbuilder_insert(ctx: *mut Context,
-                                           ptr: *mut MemSetBuilder,
-                                           s: *mut libc::c_char)
-                                           -> bool {
-    let build = mutref_from_ptr!(ptr);
-    with_context!(ctx, false, build.insert(cstr_to_str(s)));
-    true
+#[pyclass(unsendable)]
+pub struct SetStream {
+    _set: FstSet<SetData>,
+    stream: fst::set::Stream<'static>,
 }
 
-#[no_mangle]
-pub extern "C" fn fst_memsetbuilder_finish(ctx: *mut Context, ptr: *mut MemSetBuilder) -> *mut Set {
-    let build = val_from_ptr!(ptr);
-    let data = with_context!(ctx, ptr::null_mut(), build.into_inner());
-    let set = with_context!(ctx, ptr::null_mut(), Set::from_bytes(data));
-    to_raw_ptr(set)
+#[pymethods]
+impl SetStream {
+    fn __iter__(slf: PyRef<Self>) -> PyRef<Self> { slf }
+    fn __next__(mut slf: PyRefMut<Self>) -> Option<String> {
+        let bytes = slf.stream.next()?;
+        Some(String::from_utf8_lossy(bytes).into_owned())
+    }
 }
 
-#[no_mangle]
-#[allow(unused_unsafe)]
-pub unsafe extern "C" fn fst_set_open(ctx: *mut Context, cpath: *mut libc::c_char) -> *mut Set {
-    let path = cstr_to_str(cpath);
-    let set = with_context!(ctx, ptr::null_mut(), Set::from_path(path));
-    to_raw_ptr(set)
-}
-make_free_fn!(fst_set_free, *mut Set);
-
-
-#[no_mangle]
-pub extern "C" fn fst_set_contains(ptr: *mut Set, s: *mut libc::c_char) -> bool {
-    let set = mutref_from_ptr!(ptr);
-    set.contains(cstr_to_str(s))
+#[pyclass(unsendable)]
+pub struct SetRegexStream {
+    _set: FstSet<SetData>,
+    _dfa: DenseDFA<Vec<usize>, usize>,
+    stream: fst::set::Stream<'static, &'static DenseDFA<Vec<usize>, usize>>,
 }
 
-#[no_mangle]
-pub extern "C" fn fst_set_stream(ptr: *mut Set) -> *mut set::Stream<'static> {
-    let set = mutref_from_ptr!(ptr);
-    to_raw_ptr(set.stream())
-}
-make_free_fn!(fst_set_stream_free, *mut set::Stream);
-set_make_next_fn!(fst_set_stream_next, *mut set::Stream);
-
-#[no_mangle]
-pub extern "C" fn fst_set_len(ptr: *mut Set) -> libc::size_t {
-    let set = mutref_from_ptr!(ptr);
-    set.len()
+#[pymethods]
+impl SetRegexStream {
+    fn __iter__(slf: PyRef<Self>) -> PyRef<Self> { slf }
+    fn __next__(mut slf: PyRefMut<Self>) -> Option<String> {
+        let bytes = slf.stream.next()?;
+        Some(String::from_utf8_lossy(bytes).into_owned())
+    }
 }
 
-#[no_mangle]
-pub extern "C" fn fst_set_isdisjoint(self_ptr: *mut Set, oth_ptr: *mut Set) -> bool {
-    let slf = ref_from_ptr!(self_ptr);
-    let oth = ref_from_ptr!(oth_ptr);
-    slf.is_disjoint(oth)
+#[pyclass(unsendable)]
+pub struct SetLevStream {
+    _set: FstSet<SetData>,
+    _lev: Levenshtein,
+    stream: fst::set::Stream<'static, &'static Levenshtein>,
 }
 
-#[no_mangle]
-pub extern "C" fn fst_set_issubset(self_ptr: *mut Set, oth_ptr: *mut Set) -> bool {
-    let slf = ref_from_ptr!(self_ptr);
-    let oth = ref_from_ptr!(oth_ptr);
-    slf.is_subset(oth)
+#[pymethods]
+impl SetLevStream {
+    fn __iter__(slf: PyRef<Self>) -> PyRef<Self> { slf }
+    fn __next__(mut slf: PyRefMut<Self>) -> Option<String> {
+        let bytes = slf.stream.next()?;
+        Some(String::from_utf8_lossy(bytes).into_owned())
+    }
 }
 
-#[no_mangle]
-pub extern "C" fn fst_set_issuperset(self_ptr: *mut Set, oth_ptr: *mut Set) -> bool {
-    let slf = ref_from_ptr!(self_ptr);
-    let oth = ref_from_ptr!(oth_ptr);
-    slf.is_superset(oth)
+#[pyclass(unsendable)]
+pub struct SetUnion {
+    _sets: Vec<Set>,
+    stream: fst::set::Union<'static>,
 }
 
-#[no_mangle]
-pub extern "C" fn fst_set_levsearch(set_ptr: *mut Set,
-                                    lev_ptr: *mut Levenshtein)
-                                    -> *mut SetLevStream {
-    let set = mutref_from_ptr!(set_ptr);
-    let lev = ref_from_ptr!(lev_ptr);
-    to_raw_ptr(set.search(lev).into_stream())
-}
-make_free_fn!(fst_set_levstream_free, *mut SetLevStream);
-set_make_next_fn!(fst_set_levstream_next, *mut SetLevStream);
-
-#[no_mangle]
-pub extern "C" fn fst_set_regexsearch(set_ptr: *mut Set, regex_ptr: *mut Regex)
-                                      -> *mut SetRegexStream {
-    let set = mutref_from_ptr!(set_ptr);
-    let regex = ref_from_ptr!(regex_ptr);
-    to_raw_ptr(set.search(regex).into_stream())
-}
-make_free_fn!(fst_set_regexstream_free, *mut SetRegexStream);
-set_make_next_fn!(fst_set_regexstream_next, *mut SetRegexStream);
-
-#[no_mangle]
-pub extern "C" fn fst_set_make_opbuilder(ptr: *mut Set) -> *mut set::OpBuilder<'static> {
-    let set = ref_from_ptr!(ptr);
-    let ob = set.op();
-    to_raw_ptr(ob)
-}
-make_free_fn!(fst_set_opbuilder_free, *mut set::OpBuilder);
-
-#[no_mangle]
-pub extern "C" fn fst_set_opbuilder_push(ptr: *mut set::OpBuilder, set_ptr: *mut Set) {
-    let set = ref_from_ptr!(set_ptr);
-    let ob = mutref_from_ptr!(ptr);
-    ob.push(set);
+#[pymethods]
+impl SetUnion {
+    fn __iter__(slf: PyRef<Self>) -> PyRef<Self> { slf }
+    fn __next__(mut slf: PyRefMut<Self>) -> Option<String> {
+        let bytes = slf.stream.next()?;
+        Some(String::from_utf8_lossy(bytes).into_owned())
+    }
 }
 
-#[no_mangle]
-pub extern "C" fn fst_set_opbuilder_union(ptr: *mut set::OpBuilder)
-                                          -> *mut set::Union {
-    let ob = val_from_ptr!(ptr);
-    to_raw_ptr(ob.union())
-}
-make_free_fn!(fst_set_union_free, *mut set::Union);
-set_make_next_fn!(fst_set_union_next, *mut set::Union);
-
-#[no_mangle]
-pub extern "C" fn fst_set_opbuilder_intersection(ptr: *mut set::OpBuilder)
-                                                 -> *mut set::Intersection {
-    let ob = val_from_ptr!(ptr);
-    to_raw_ptr(ob.intersection())
-}
-make_free_fn!(fst_set_intersection_free, *mut set::Intersection);
-set_make_next_fn!(fst_set_intersection_next, *mut set::Intersection);
-
-#[no_mangle]
-pub extern "C" fn fst_set_opbuilder_difference(ptr: *mut set::OpBuilder)
-                                               -> *mut set::Difference {
-    let ob = val_from_ptr!(ptr);
-    to_raw_ptr(ob.difference())
-}
-make_free_fn!(fst_set_difference_free, *mut set::Difference);
-set_make_next_fn!(fst_set_difference_next, *mut set::Difference);
-
-#[no_mangle]
-pub extern "C" fn fst_set_opbuilder_symmetricdifference
-    (ptr: *mut set::OpBuilder)
-     -> *mut set::SymmetricDifference {
-    let ob = val_from_ptr!(ptr);
-    to_raw_ptr(ob.symmetric_difference())
-}
-make_free_fn!(fst_set_symmetricdifference_free, *mut set::SymmetricDifference);
-set_make_next_fn!(fst_set_symmetricdifference_next, *mut set::SymmetricDifference);
-
-
-#[no_mangle]
-pub extern "C" fn fst_set_streambuilder_new(ptr: *mut Set) -> *mut set::StreamBuilder<'static> {
-    let set = ref_from_ptr!(ptr);
-    to_raw_ptr(set.range())
+#[pyclass(unsendable)]
+pub struct SetIntersection {
+    _sets: Vec<Set>,
+    stream: fst::set::Intersection<'static>,
 }
 
-#[no_mangle]
-pub extern "C" fn fst_set_streambuilder_add_ge(ptr: *mut set::StreamBuilder<'static>,
-                                               c_bound: *mut libc::c_char)
-                                               -> *mut set::StreamBuilder<'static> {
-    let sb = val_from_ptr!(ptr);
-    to_raw_ptr(sb.ge(cstr_to_str(c_bound)))
+#[pymethods]
+impl SetIntersection {
+    fn __iter__(slf: PyRef<Self>) -> PyRef<Self> { slf }
+    fn __next__(mut slf: PyRefMut<Self>) -> Option<String> {
+        let bytes = slf.stream.next()?;
+        Some(String::from_utf8_lossy(bytes).into_owned())
+    }
 }
 
-#[no_mangle]
-pub extern "C" fn fst_set_streambuilder_add_lt(ptr: *mut set::StreamBuilder<'static>,
-                                               c_bound: *mut libc::c_char)
-                                               -> *mut set::StreamBuilder<'static> {
-    let sb = val_from_ptr!(ptr);
-    to_raw_ptr(sb.lt(cstr_to_str(c_bound)))
+#[pyclass(unsendable)]
+pub struct SetDifference {
+    _sets: Vec<Set>,
+    stream: fst::set::Difference<'static>,
 }
 
-#[no_mangle]
-pub extern "C" fn fst_set_streambuilder_finish(ptr: *mut set::StreamBuilder<'static>)
-                                               -> *mut set::Stream {
-    let sb = val_from_ptr!(ptr);
-    to_raw_ptr(sb.into_stream())
+#[pymethods]
+impl SetDifference {
+    fn __iter__(slf: PyRef<Self>) -> PyRef<Self> { slf }
+    fn __next__(mut slf: PyRefMut<Self>) -> Option<String> {
+        let bytes = slf.stream.next()?;
+        Some(String::from_utf8_lossy(bytes).into_owned())
+    }
+}
+
+#[pyclass(unsendable)]
+pub struct SetSymmetricDifference {
+    _sets: Vec<Set>,
+    stream: fst::set::SymmetricDifference<'static>,
+}
+
+#[pymethods]
+impl SetSymmetricDifference {
+    fn __iter__(slf: PyRef<Self>) -> PyRef<Self> { slf }
+    fn __next__(mut slf: PyRefMut<Self>) -> Option<String> {
+        let bytes = slf.stream.next()?;
+        Some(String::from_utf8_lossy(bytes).into_owned())
+    }
+}
+
+enum BuilderInner {
+    Memory(FstSetBuilder<Vec<u8>>),
+    File(FstSetBuilder<BufWriter<File>>),
+}
+
+#[pyclass]
+pub struct SetBuilder {
+    inner: Option<BuilderInner>,
+}
+
+#[pymethods]
+impl SetBuilder {
+    #[new]
+    fn new(path: Option<String>) -> PyResult<Self> {
+        let inner = if let Some(p) = path {
+            let file = File::create(p)?;
+            let wtr = BufWriter::new(file);
+            let builder = FstSetBuilder::new(wtr).map_err(|e| PyValueError::new_err(e.to_string()))?;
+            BuilderInner::File(builder)
+        } else {
+            let builder = FstSetBuilder::memory();
+            BuilderInner::Memory(builder)
+        };
+        Ok(SetBuilder { inner: Some(inner) })
+    }
+
+    fn insert(&mut self, key: &str) -> PyResult<()> {
+        match self.inner.as_mut() {
+            Some(BuilderInner::Memory(b)) => b.insert(key).map_err(|e| PyValueError::new_err(e.to_string())),
+            Some(BuilderInner::File(b)) => b.insert(key).map_err(|e| PyValueError::new_err(e.to_string())),
+            None => Err(PyValueError::new_err("Builder already finished")),
+        }
+    }
+
+    fn finish(&mut self) -> PyResult<Option<Set>> {
+        match self.inner.take() {
+            Some(BuilderInner::Memory(b)) => {
+                let bytes = b.into_inner().map_err(|e| PyValueError::new_err(e.to_string()))?;
+                let set = FstSet::new(SetData::Vec(Arc::new(bytes)))
+                    .map_err(|e| PyValueError::new_err(e.to_string()))?;
+                Ok(Some(Set { inner: set }))
+            },
+            Some(BuilderInner::File(b)) => {
+                b.finish().map_err(|e| PyValueError::new_err(e.to_string()))?;
+                Ok(None)
+            },
+            None => Err(PyValueError::new_err("Builder already finished")),
+        }
+    }
 }

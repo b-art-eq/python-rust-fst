@@ -1,15 +1,16 @@
 [package]
-
 name = "rust_fst"
 version = "0.3.0"
 authors = ["Johannes Baiter <johannes.baiter@gmail.com>"]
+edition = "2021"
 
 [lib]
 name = "rust_fst"
 crate-type = ["cdylib"]
 
 [dependencies]
-libc = "0.2"
-fst = "^0.3.5"
-fst-levenshtein = "^0.2.1"
-fst-regex = "^0.2.2"
+pyo3 = { version = "0.20", features = ["extension-module", "abi3-py37"] }
+fst = { version = "0.4", features = ["levenshtein"] }
+regex-automata = { version = "0.1", features = ["transducer"] }
+memmap2 = "0.9"
+thiserror = "1.0"

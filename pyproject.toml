@@ -1,3 +1,27 @@
 [build-system]
-requires = ["setuptools", "wheel", "milksnake"]
-build-backend = "setuptools.build_meta"
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "rust-fst"
+version = "0.3.0"
+description = "Python bindings for the Rust `fst` create, providing sets and maps backed by finite state transducers."
+authors = [{name = "Johannes Baiter", email = "johannes.baiter@gmail.com"}]
+license = {text = "MIT"}
+readme = "README.md"
+requires-python = ">=3.8"
+keywords = ["fst", "rust", "levenshtein", "automata", "transducer", "data_structures"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Topic :: Text Processing :: Indexing",
+    "Programming Language :: Rust",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Programming Language :: Python :: Implementation :: PyPy",
+]
+
+[tool.maturin]
+features = ["pyo3/extension-module"]
+module-name = "rust_fst._native"
