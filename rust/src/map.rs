@@ -70,7 +70,7 @@ impl Map {
 
     fn keys(&self) -> MapKeys {
         let stream = self.inner.keys();
-        let stream = unsafe { std::mem::transmute(stream) };
+        let stream = unsafe { std::mem::transmute::<fst::map::Keys<'_>, fst::map::Keys<'static>>(stream) };
         MapKeys {
             _map: self.inner.clone(),
             stream,
@@ -79,7 +79,7 @@ impl Map {
 
     fn values(&self) -> MapValues {
         let stream = self.inner.values();
-        let stream = unsafe { std::mem::transmute(stream) };
+        let stream = unsafe { std::mem::transmute::<fst::map::Values<'_>, fst::map::Values<'static>>(stream) };
         MapValues {
             _map: self.inner.clone(),
             stream,
@@ -88,7 +88,7 @@ impl Map {
 
     fn items(&self) -> MapItems {
         let stream = self.inner.stream();
-        let stream = unsafe { std::mem::transmute(stream) };
+        let stream = unsafe { std::mem::transmute::<fst::map::Stream<'_>, fst::map::Stream<'static>>(stream) };
         MapItems {
             _map: self.inner.clone(),
             stream,
@@ -101,7 +101,12 @@ impl Map {
             .build(regex)
             .map_err(|e| PyValueError::new_err(e.to_string()))?;
         let stream = self.inner.search(&dfa).into_stream();
-        let stream = unsafe { std::mem::transmute(stream) };
+        let stream = unsafe {
+            std::mem::transmute::<
+                fst::map::Stream<'_, &DenseDFA<Vec<usize>, usize>>,
+                fst::map::Stream<'static, &'static DenseDFA<Vec<usize>, usize>>,
+            >(stream)
+        };
         Ok(MapRegexStream {
             _map: self.inner.clone(),
             _dfa: dfa,
@@ -113,7 +118,12 @@ impl Map {
         let lev =
             Levenshtein::new(key, max_dist).map_err(|e| PyValueError::new_err(e.to_string()))?;
         let stream = self.inner.search(&lev).into_stream();
-        let stream = unsafe { std::mem::transmute(stream) };
+        let stream = unsafe {
+            std::mem::transmute::<
+                fst::map::Stream<'_, &Levenshtein>,
+                fst::map::Stream<'static, &'static Levenshtein>,
+            >(stream)
+        };
         Ok(MapLevStream {
             _map: self.inner.clone(),
             _lev: lev,

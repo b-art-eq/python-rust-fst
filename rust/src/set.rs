@@ -60,7 +60,7 @@ impl Set {
 
     fn __iter__(&self) -> SetStream {
         let stream = self.inner.stream();
-        let stream = unsafe { std::mem::transmute(stream) };
+        let stream = unsafe { std::mem::transmute::<fst::set::Stream<'_>, fst::set::Stream<'static>>(stream) };
         SetStream {
             _set: self.inner.clone(),
             stream,
@@ -73,7 +73,12 @@ impl Set {
             .build(regex)
             .map_err(|e| PyValueError::new_err(e.to_string()))?;
         let stream = self.inner.search(&dfa).into_stream();
-        let stream = unsafe { std::mem::transmute(stream) };
+        let stream = unsafe {
+            std::mem::transmute::<
+                fst::set::Stream<'_, &DenseDFA<Vec<usize>, usize>>,
+                fst::set::Stream<'static, &'static DenseDFA<Vec<usize>, usize>>,
+            >(stream)
+        };
         Ok(SetRegexStream {
             _set: self.inner.clone(),
             _dfa: dfa,
@@ -85,7 +90,12 @@ impl Set {
         let lev =
             Levenshtein::new(key, max_dist).map_err(|e| PyValueError::new_err(e.to_string()))?;
         let stream = self.inner.search(&lev).into_stream();
-        let stream = unsafe { std::mem::transmute(stream) };
+        let stream = unsafe {
+            std::mem::transmute::<
+                fst::set::Stream<'_, &Levenshtein>,
+                fst::set::Stream<'static, &'static Levenshtein>,
+            >(stream)
+        };
         Ok(SetLevStream {
             _set: self.inner.clone(),
             _lev: lev,
@@ -108,7 +118,7 @@ impl Set {
     fn union(&self, other: &Set) -> SetUnion {
         let sets = vec![self.clone(), other.clone()];
         let op = self.inner.op().add(&self.inner).add(&other.inner).union();
-        let stream = unsafe { std::mem::transmute(op) };
+        let stream = unsafe { std::mem::transmute::<fst::set::Union<'_>, fst::set::Union<'static>>(op) };
         SetUnion {
             _sets: sets,
             stream,
@@ -123,7 +133,7 @@ impl Set {
             .add(&self.inner)
             .add(&other.inner)
             .intersection();
-        let stream = unsafe { std::mem::transmute(op) };
+        let stream = unsafe { std::mem::transmute::<fst::set::Intersection<'_>, fst::set::Intersection<'static>>(op) };
         SetIntersection {
             _sets: sets,
             stream,
@@ -138,7 +148,7 @@ impl Set {
             .add(&self.inner)
             .add(&other.inner)
             .difference();
-        let stream = unsafe { std::mem::transmute(op) };
+        let stream = unsafe { std::mem::transmute::<fst::set::Difference<'_>, fst::set::Difference<'static>>(op) };
         SetDifference {
             _sets: sets,
             stream,
@@ -153,7 +163,7 @@ impl Set {
             .add(&self.inner)
             .add(&other.inner)
             .symmetric_difference();
-        let stream = unsafe { std::mem::transmute(op) };
+        let stream = unsafe { std::mem::transmute::<fst::set::SymmetricDifference<'_>, fst::set::SymmetricDifference<'static>>(op) };
         SetSymmetricDifference {
             _sets: sets,
             stream,

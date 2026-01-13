@@ -9,7 +9,7 @@ description = "Python bindings for the Rust `fst` create, providing sets and map
 authors = [{name = "Johannes Baiter", email = "johannes.baiter@gmail.com"}]
 license = {text = "MIT"}
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 keywords = ["fst", "rust", "levenshtein", "automata", "transducer", "data_structures"]
 classifiers = [
     "Development Status :: 4 - Beta",
