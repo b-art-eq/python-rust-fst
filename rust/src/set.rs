@@ -1,12 +1,12 @@
+use fst::automaton::Levenshtein;
+use fst::{IntoStreamer, Set as FstSet, SetBuilder as FstSetBuilder, Streamer};
+use memmap2::Mmap;
+use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::exceptions::{PyValueError, PyTypeError};
+use regex_automata::DenseDFA;
 use std::fs::File;
 use std::io::BufWriter;
 use std::sync::Arc;
-use memmap2::Mmap;
-use fst::{Set as FstSet, SetBuilder as FstSetBuilder, Streamer, IntoStreamer};
-use fst::automaton::Levenshtein;
-use regex_automata::DenseDFA;
 
 #[derive(Clone)]
 pub enum SetData {
@@ -44,7 +44,9 @@ impl Set {
                 .map_err(|e| PyValueError::new_err(e.to_string()))?;
             Ok(Set { inner: set })
         } else {
-            Err(PyTypeError::new_err("Argument must be a path (str) or bytes"))
+            Err(PyTypeError::new_err(
+                "Argument must be a path (str) or bytes",
+            ))
         }
     }
 
@@ -80,7 +82,8 @@ impl Set {
     }
 
     fn search_lev(&self, key: &str, max_dist: u32) -> PyResult<SetLevStream> {
-        let lev = Levenshtein::new(key, max_dist).map_err(|e| PyValueError::new_err(e.to_string()))?;
+        let lev =
+            Levenshtein::new(key, max_dist).map_err(|e| PyValueError::new_err(e.to_string()))?;
         let stream = self.inner.search(&lev).into_stream();
         let stream = unsafe { std::mem::transmute(stream) };
         Ok(SetLevStream {
@@ -106,28 +109,55 @@ impl Set {
         let sets = vec![self.clone(), other.clone()];
         let op = self.inner.op().add(&self.inner).add(&other.inner).union();
         let stream = unsafe { std::mem::transmute(op) };
-        SetUnion { _sets: sets, stream }
+        SetUnion {
+            _sets: sets,
+            stream,
+        }
     }
 
     fn intersection(&self, other: &Set) -> SetIntersection {
         let sets = vec![self.clone(), other.clone()];
-        let op = self.inner.op().add(&self.inner).add(&other.inner).intersection();
+        let op = self
+            .inner
+            .op()
+            .add(&self.inner)
+            .add(&other.inner)
+            .intersection();
         let stream = unsafe { std::mem::transmute(op) };
-        SetIntersection { _sets: sets, stream }
+        SetIntersection {
+            _sets: sets,
+            stream,
+        }
     }
 
     fn difference(&self, other: &Set) -> SetDifference {
         let sets = vec![self.clone(), other.clone()];
-        let op = self.inner.op().add(&self.inner).add(&other.inner).difference();
+        let op = self
+            .inner
+            .op()
+            .add(&self.inner)
+            .add(&other.inner)
+            .difference();
         let stream = unsafe { std::mem::transmute(op) };
-        SetDifference { _sets: sets, stream }
+        SetDifference {
+            _sets: sets,
+            stream,
+        }
     }
 
     fn symmetric_difference(&self, other: &Set) -> SetSymmetricDifference {
         let sets = vec![self.clone(), other.clone()];
-        let op = self.inner.op().add(&self.inner).add(&other.inner).symmetric_difference();
+        let op = self
+            .inner
+            .op()
+            .add(&self.inner)
+            .add(&other.inner)
+            .symmetric_difference();
         let stream = unsafe { std::mem::transmute(op) };
-        SetSymmetricDifference { _sets: sets, stream }
+        SetSymmetricDifference {
+            _sets: sets,
+            stream,
+        }
     }
 }
 
@@ -139,7 +169,9 @@ pub struct SetStream {
 
 #[pymethods]
 impl SetStream {
-    fn __iter__(slf: PyRef<Self>) -> PyRef<Self> { slf }
+    fn __iter__(slf: PyRef<Self>) -> PyRef<Self> {
+        slf
+    }
     fn __next__(mut slf: PyRefMut<Self>) -> Option<String> {
         let bytes = slf.stream.next()?;
         Some(String::from_utf8_lossy(bytes).into_owned())
@@ -155,7 +187,9 @@ pub struct SetRegexStream {
 
 #[pymethods]
 impl SetRegexStream {
-    fn __iter__(slf: PyRef<Self>) -> PyRef<Self> { slf }
+    fn __iter__(slf: PyRef<Self>) -> PyRef<Self> {
+        slf
+    }
     fn __next__(mut slf: PyRefMut<Self>) -> Option<String> {
         let bytes = slf.stream.next()?;
         Some(String::from_utf8_lossy(bytes).into_owned())
@@ -171,7 +205,9 @@ pub struct SetLevStream {
 
 #[pymethods]
 impl SetLevStream {
-    fn __iter__(slf: PyRef<Self>) -> PyRef<Self> { slf }
+    fn __iter__(slf: PyRef<Self>) -> PyRef<Self> {
+        slf
+    }
     fn __next__(mut slf: PyRefMut<Self>) -> Option<String> {
         let bytes = slf.stream.next()?;
         Some(String::from_utf8_lossy(bytes).into_owned())
@@ -186,7 +222,9 @@ pub struct SetUnion {
 
 #[pymethods]
 impl SetUnion {
-    fn __iter__(slf: PyRef<Self>) -> PyRef<Self> { slf }
+    fn __iter__(slf: PyRef<Self>) -> PyRef<Self> {
+        slf
+    }
     fn __next__(mut slf: PyRefMut<Self>) -> Option<String> {
         let bytes = slf.stream.next()?;
         Some(String::from_utf8_lossy(bytes).into_owned())
@@ -201,7 +239,9 @@ pub struct SetIntersection {
 
 #[pymethods]
 impl SetIntersection {
-    fn __iter__(slf: PyRef<Self>) -> PyRef<Self> { slf }
+    fn __iter__(slf: PyRef<Self>) -> PyRef<Self> {
+        slf
+    }
     fn __next__(mut slf: PyRefMut<Self>) -> Option<String> {
         let bytes = slf.stream.next()?;
         Some(String::from_utf8_lossy(bytes).into_owned())
@@ -216,7 +256,9 @@ pub struct SetDifference {
 
 #[pymethods]
 impl SetDifference {
-    fn __iter__(slf: PyRef<Self>) -> PyRef<Self> { slf }
+    fn __iter__(slf: PyRef<Self>) -> PyRef<Self> {
+        slf
+    }
     fn __next__(mut slf: PyRefMut<Self>) -> Option<String> {
         let bytes = slf.stream.next()?;
         Some(String::from_utf8_lossy(bytes).into_owned())
@@ -231,7 +273,9 @@ pub struct SetSymmetricDifference {
 
 #[pymethods]
 impl SetSymmetricDifference {
-    fn __iter__(slf: PyRef<Self>) -> PyRef<Self> { slf }
+    fn __iter__(slf: PyRef<Self>) -> PyRef<Self> {
+        slf
+    }
     fn __next__(mut slf: PyRefMut<Self>) -> Option<String> {
         let bytes = slf.stream.next()?;
         Some(String::from_utf8_lossy(bytes).into_owned())
@@ -255,7 +299,8 @@ impl SetBuilder {
         let inner = if let Some(p) = path {
             let file = File::create(p)?;
             let wtr = BufWriter::new(file);
-            let builder = FstSetBuilder::new(wtr).map_err(|e| PyValueError::new_err(e.to_string()))?;
+            let builder =
+                FstSetBuilder::new(wtr).map_err(|e| PyValueError::new_err(e.to_string()))?;
             BuilderInner::File(builder)
         } else {
             let builder = FstSetBuilder::memory();
@@ -266,8 +311,12 @@ impl SetBuilder {
 
     fn insert(&mut self, key: &str) -> PyResult<()> {
         match self.inner.as_mut() {
-            Some(BuilderInner::Memory(b)) => b.insert(key).map_err(|e| PyValueError::new_err(e.to_string())),
-            Some(BuilderInner::File(b)) => b.insert(key).map_err(|e| PyValueError::new_err(e.to_string())),
+            Some(BuilderInner::Memory(b)) => b
+                .insert(key)
+                .map_err(|e| PyValueError::new_err(e.to_string())),
+            Some(BuilderInner::File(b)) => b
+                .insert(key)
+                .map_err(|e| PyValueError::new_err(e.to_string())),
             None => Err(PyValueError::new_err("Builder already finished")),
         }
     }
@@ -275,15 +324,18 @@ impl SetBuilder {
     fn finish(&mut self) -> PyResult<Option<Set>> {
         match self.inner.take() {
             Some(BuilderInner::Memory(b)) => {
-                let bytes = b.into_inner().map_err(|e| PyValueError::new_err(e.to_string()))?;
+                let bytes = b
+                    .into_inner()
+                    .map_err(|e| PyValueError::new_err(e.to_string()))?;
                 let set = FstSet::new(SetData::Vec(Arc::new(bytes)))
                     .map_err(|e| PyValueError::new_err(e.to_string()))?;
                 Ok(Some(Set { inner: set }))
-            },
+            }
             Some(BuilderInner::File(b)) => {
-                b.finish().map_err(|e| PyValueError::new_err(e.to_string()))?;
+                b.finish()
+                    .map_err(|e| PyValueError::new_err(e.to_string()))?;
                 Ok(None)
-            },
+            }
             None => Err(PyValueError::new_err("Builder already finished")),
         }
     }

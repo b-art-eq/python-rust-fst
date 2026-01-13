@@ -1,12 +1,12 @@
+use fst::automaton::Levenshtein;
+use fst::{IntoStreamer, Map as FstMap, MapBuilder as FstMapBuilder, Streamer};
+use memmap2::Mmap;
+use pyo3::exceptions::{PyKeyError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::exceptions::{PyKeyError, PyValueError, PyTypeError};
+use regex_automata::DenseDFA;
 use std::fs::File;
 use std::io::BufWriter;
 use std::sync::Arc;
-use memmap2::Mmap;
-use fst::{Map as FstMap, MapBuilder as FstMapBuilder, Streamer, IntoStreamer};
-use fst::automaton::Levenshtein;
-use regex_automata::DenseDFA;
 
 #[derive(Clone)]
 pub enum MapData {
@@ -44,7 +44,9 @@ impl Map {
                 .map_err(|e| PyValueError::new_err(e.to_string()))?;
             Ok(Map { inner: map })
         } else {
-            Err(PyTypeError::new_err("Argument must be a path (str) or bytes"))
+            Err(PyTypeError::new_err(
+                "Argument must be a path (str) or bytes",
+            ))
         }
     }
 
@@ -53,13 +55,15 @@ impl Map {
     }
 
     fn __getitem__(&self, key: &str) -> PyResult<u64> {
-        self.inner.get(key).ok_or_else(|| PyKeyError::new_err(key.to_string()))
+        self.inner
+            .get(key)
+            .ok_or_else(|| PyKeyError::new_err(key.to_string()))
     }
 
     fn __len__(&self) -> usize {
         self.inner.len()
     }
-    
+
     fn get(&self, key: &str, default: Option<u64>) -> Option<u64> {
         self.inner.get(key).or(default)
     }
@@ -90,7 +94,7 @@ impl Map {
             stream,
         }
     }
-    
+
     fn search_re(&self, regex: &str) -> PyResult<MapRegexStream> {
         let dfa = regex_automata::dense::Builder::new()
             .anchored(true)
@@ -106,7 +110,8 @@ impl Map {
     }
 
     fn search_lev(&self, key: &str, max_dist: u32) -> PyResult<MapLevStream> {
-        let lev = Levenshtein::new(key, max_dist).map_err(|e| PyValueError::new_err(e.to_string()))?;
+        let lev =
+            Levenshtein::new(key, max_dist).map_err(|e| PyValueError::new_err(e.to_string()))?;
         let stream = self.inner.search(&lev).into_stream();
         let stream = unsafe { std::mem::transmute(stream) };
         Ok(MapLevStream {
@@ -125,7 +130,9 @@ pub struct MapKeys {
 
 #[pymethods]
 impl MapKeys {
-    fn __iter__(slf: PyRef<Self>) -> PyRef<Self> { slf }
+    fn __iter__(slf: PyRef<Self>) -> PyRef<Self> {
+        slf
+    }
     fn __next__(mut slf: PyRefMut<Self>) -> Option<String> {
         let bytes = slf.stream.next()?;
         Some(String::from_utf8_lossy(bytes).into_owned())
@@ -140,7 +147,9 @@ pub struct MapValues {
 
 #[pymethods]
 impl MapValues {
-    fn __iter__(slf: PyRef<Self>) -> PyRef<Self> { slf }
+    fn __iter__(slf: PyRef<Self>) -> PyRef<Self> {
+        slf
+    }
     fn __next__(mut slf: PyRefMut<Self>) -> Option<u64> {
         slf.stream.next()
     }
@@ -154,7 +163,9 @@ pub struct MapItems {
 
 #[pymethods]
 impl MapItems {
-    fn __iter__(slf: PyRef<Self>) -> PyRef<Self> { slf }
+    fn __iter__(slf: PyRef<Self>) -> PyRef<Self> {
+        slf
+    }
     fn __next__(mut slf: PyRefMut<Self>) -> Option<(String, u64)> {
         let (bytes, val) = slf.stream.next()?;
         Some((String::from_utf8_lossy(bytes).into_owned(), val))
@@ -170,7 +181,9 @@ pub struct MapRegexStream {
 
 #[pymethods]
 impl MapRegexStream {
-    fn __iter__(slf: PyRef<Self>) -> PyRef<Self> { slf }
+    fn __iter__(slf: PyRef<Self>) -> PyRef<Self> {
+        slf
+    }
     fn __next__(mut slf: PyRefMut<Self>) -> Option<(String, u64)> {
         let (bytes, val) = slf.stream.next()?;
         Some((String::from_utf8_lossy(bytes).into_owned(), val))
@@ -186,7 +199,9 @@ pub struct MapLevStream {
 
 #[pymethods]
 impl MapLevStream {
-    fn __iter__(slf: PyRef<Self>) -> PyRef<Self> { slf }
+    fn __iter__(slf: PyRef<Self>) -> PyRef<Self> {
+        slf
+    }
     fn __next__(mut slf: PyRefMut<Self>) -> Option<(String, u64)> {
         let (bytes, val) = slf.stream.next()?;
         Some((String::from_utf8_lossy(bytes).into_owned(), val))
@@ -210,7 +225,8 @@ impl MapBuilder {
         let inner = if let Some(p) = path {
             let file = File::create(p)?;
             let wtr = BufWriter::new(file);
-            let builder = FstMapBuilder::new(wtr).map_err(|e| PyValueError::new_err(e.to_string()))?;
+            let builder =
+                FstMapBuilder::new(wtr).map_err(|e| PyValueError::new_err(e.to_string()))?;
             BuilderInner::File(builder)
         } else {
             let builder = FstMapBuilder::memory();
@@ -221,8 +237,12 @@ impl MapBuilder {
 
     fn insert(&mut self, key: &str, val: u64) -> PyResult<()> {
         match self.inner.as_mut() {
-            Some(BuilderInner::Memory(b)) => b.insert(key, val).map_err(|e| PyValueError::new_err(e.to_string())),
-            Some(BuilderInner::File(b)) => b.insert(key, val).map_err(|e| PyValueError::new_err(e.to_string())),
+            Some(BuilderInner::Memory(b)) => b
+                .insert(key, val)
+                .map_err(|e| PyValueError::new_err(e.to_string())),
+            Some(BuilderInner::File(b)) => b
+                .insert(key, val)
+                .map_err(|e| PyValueError::new_err(e.to_string())),
             None => Err(PyValueError::new_err("Builder already finished")),
         }
     }
@@ -230,15 +250,18 @@ impl MapBuilder {
     fn finish(&mut self) -> PyResult<Option<Map>> {
         match self.inner.take() {
             Some(BuilderInner::Memory(b)) => {
-                let bytes = b.into_inner().map_err(|e| PyValueError::new_err(e.to_string()))?;
+                let bytes = b
+                    .into_inner()
+                    .map_err(|e| PyValueError::new_err(e.to_string()))?;
                 let map = FstMap::new(MapData::Vec(Arc::new(bytes)))
                     .map_err(|e| PyValueError::new_err(e.to_string()))?;
                 Ok(Some(Map { inner: map }))
-            },
+            }
             Some(BuilderInner::File(b)) => {
-                b.finish().map_err(|e| PyValueError::new_err(e.to_string()))?;
+                b.finish()
+                    .map_err(|e| PyValueError::new_err(e.to_string()))?;
                 Ok(None)
-            },
+            }
             None => Err(PyValueError::new_err("Builder already finished")),
         }
     }
