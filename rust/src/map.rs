@@ -70,7 +70,8 @@ impl Map {
 
     fn keys(&self) -> MapKeys {
         let stream = self.inner.keys();
-        let stream = unsafe { std::mem::transmute::<fst::map::Keys<'_>, fst::map::Keys<'static>>(stream) };
+        let stream =
+            unsafe { std::mem::transmute::<fst::map::Keys<'_>, fst::map::Keys<'static>>(stream) };
         MapKeys {
             _map: self.inner.clone(),
             stream,
@@ -79,7 +80,9 @@ impl Map {
 
     fn values(&self) -> MapValues {
         let stream = self.inner.values();
-        let stream = unsafe { std::mem::transmute::<fst::map::Values<'_>, fst::map::Values<'static>>(stream) };
+        let stream = unsafe {
+            std::mem::transmute::<fst::map::Values<'_>, fst::map::Values<'static>>(stream)
+        };
         MapValues {
             _map: self.inner.clone(),
             stream,
@@ -88,7 +91,9 @@ impl Map {
 
     fn items(&self) -> MapItems {
         let stream = self.inner.stream();
-        let stream = unsafe { std::mem::transmute::<fst::map::Stream<'_>, fst::map::Stream<'static>>(stream) };
+        let stream = unsafe {
+            std::mem::transmute::<fst::map::Stream<'_>, fst::map::Stream<'static>>(stream)
+        };
         MapItems {
             _map: self.inner.clone(),
             stream,
