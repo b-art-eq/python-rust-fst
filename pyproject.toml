@@ -25,3 +25,4 @@ classifiers = [
 [tool.maturin]
 features = ["pyo3/extension-module"]
 module-name = "rust_fst._native"
+manifest-path = "rust/Cargo.toml"
