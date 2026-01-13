@@ -1,3 +1,4 @@
+#![allow(deprecated)]
 use pyo3::prelude::*;
 
 mod map;
