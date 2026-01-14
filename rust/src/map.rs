@@ -32,14 +32,14 @@ pub struct Map {
 #[pymethods]
 impl Map {
     #[new]
-    fn new(path_or_bytes: &PyAny) -> PyResult<Self> {
-        if let Ok(path) = path_or_bytes.extract::<String>() {
-            let file = File::open(path)?;
+    fn new(path: &PyAny) -> PyResult<Self> {
+        if let Ok(p) = path.extract::<String>() {
+            let file = File::open(p)?;
             let mmap = unsafe { Mmap::map(&file)? };
             let map = FstMap::new(MapData::Mmap(Arc::new(mmap)))
                 .map_err(|e| PyValueError::new_err(e.to_string()))?;
             Ok(Map { inner: map })
-        } else if let Ok(bytes) = path_or_bytes.extract::<&[u8]>() {
+        } else if let Ok(bytes) = path.extract::<&[u8]>() {
             let map = FstMap::new(MapData::Vec(Arc::new(bytes.to_vec())))
                 .map_err(|e| PyValueError::new_err(e.to_string()))?;
             Ok(Map { inner: map })
